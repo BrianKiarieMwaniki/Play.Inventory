@@ -42,11 +42,28 @@ namespace Play.Inventory.Service
             })
             .AddTransientHttpErrorPolicy(builder => builder.Or<TimeoutRejectedException>().WaitAndRetryAsync(
                 retryCount: 5,
-                sleepDurationProvider: retryAttemp => TimeSpan.FromSeconds(Math.Pow(2, retryAttemp))+ TimeSpan.FromMilliseconds(jitterer.Next(0,1000)),
-                onRetry: (outcome, timespan, retryAttempt) => {
+                sleepDurationProvider: retryAttemp => TimeSpan.FromSeconds(Math.Pow(2, retryAttemp)) + TimeSpan.FromMilliseconds(jitterer.Next(0, 1000)),
+                onRetry: (outcome, timespan, retryAttempt) =>
+                {
                     var sp = services.BuildServiceProvider();
                     sp.GetService<ILogger<CatalogClient>>()?
                         .LogWarning($"Delaying for {timespan.TotalSeconds} seconds,then making retry {retryAttempt}");
+                }
+            ))
+            .AddTransientHttpErrorPolicy(builder => builder.Or<TimeoutRejectedException>().CircuitBreakerAsync(
+                3,
+                TimeSpan.FromSeconds(15),
+                onBreak: (outcome, timespan) =>
+                {
+                    var sp = services.BuildServiceProvider();
+                    sp.GetService<ILogger<CatalogClient>>()?
+                        .LogWarning($"Opening the circuit for {timespan.TotalSeconds} seconds...");
+                },
+                onReset: () =>
+                {
+                var sp = services.BuildServiceProvider();
+                sp.GetService<ILogger<CatalogClient>>()?
+                    .LogWarning($"Closing the circuit");
                 }
             ))
             .AddPolicyHandler(Policy.TimeoutAsync<HttpResponseMessage>(1));
